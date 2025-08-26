@@ -128,3 +128,23 @@ export type DocumentProcessingStatus = {
   chunkCount?: number;
   industry?: string;
 };
+
+export type APIKeyRequest = {
+  provider: string;
+  apiKey: string;
+};
+
+export type ModelInfo = {
+  id: string;
+  name: string;
+  description?: string;
+  contextLength?: number;
+  provider: string;
+};
+
+export type ProviderModelsResponse = {
+  provider: string;
+  models: ModelInfo[];
+  isValid: boolean;
+  error?: string;
+};

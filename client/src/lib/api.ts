@@ -1,5 +1,5 @@
 import { apiRequest } from "./queryClient";
-import type { Document, ChatSession, ChatMessage, QueryRequest, QueryResponse, VoiceQueryRequest, DocumentProcessingStatus } from "@shared/schema";
+import type { Document, ChatSession, ChatMessage, QueryRequest, QueryResponse, VoiceQueryRequest, DocumentProcessingStatus, APIKeyRequest, ProviderModelsResponse, ModelInfo } from "@shared/schema";
 
 export const api = {
   // Document operations
@@ -65,5 +65,23 @@ export const api = {
       const response = await apiRequest('POST', '/api/chat/text-to-speech', { text, voice });
       return response.json();
     },
+  },
+
+  // Model and API key management
+  models: {
+    setApiKey: async (provider: string, apiKey: string): Promise<{ success: boolean; provider: string }> => {
+      const response = await apiRequest('POST', '/api/models/set-api-key', { provider, apiKey });
+      return response.json();
+    },
+
+    getProviderModels: async (provider: string): Promise<ProviderModelsResponse> => {
+      const response = await apiRequest('GET', `/api/models/${provider}`, undefined);
+      return response.json();
+    },
+
+    testApiKey: async (provider: string, apiKey: string): Promise<{ isValid: boolean; provider: string }> => {
+      const response = await apiRequest('POST', '/api/models/test-key', { provider, apiKey });
+      return response.json();
+    }
   },
 };

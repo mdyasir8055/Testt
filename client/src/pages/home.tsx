@@ -18,8 +18,9 @@ import type { Document, ChatMessage as ChatMessageType, QueryResponse } from '@s
 
 export default function Home() {
   const [currentSessionId, setCurrentSessionId] = useState<string>('');
-  const [selectedModel, setSelectedModel] = useState<string>('groq');
+  const [selectedModel, setSelectedModel] = useState<string>('');
   const [chatMode, setChatMode] = useState<string>('standard');
+  const [selectedIndustry, setSelectedIndustry] = useState<string>('general');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSourcesOpen, setIsSourcesOpen] = useState(false);
   const [selectedSources, setSelectedSources] = useState<QueryResponse['sources']>([]);
@@ -87,10 +88,13 @@ export default function Home() {
   const handleSendMessage = (message: string) => {
     if (!currentSessionId || !message.trim()) return;
 
+    const documentIds = documents.map(doc => doc.id);
+    
     sendMessageMutation.mutate({
       sessionId: currentSessionId,
       message: message.trim(),
-      mode: chatMode,
+      mode: `${selectedIndustry}_${chatMode}`,
+      documentIds: documentIds.length > 0 ? documentIds : undefined,
     });
   };
 
@@ -160,7 +164,10 @@ export default function Home() {
           />
 
           {/* Industry Templates */}
-          <IndustryTemplates />
+          <IndustryTemplates 
+            selectedIndustry={selectedIndustry} 
+            onIndustryChange={setSelectedIndustry} 
+          />
         </div>
 
         {/* Main Chat Area */}
