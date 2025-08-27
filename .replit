@@ -1,14 +1,15 @@
-modules = ["nodejs-20", "web", "postgresql-16"]
+modules = ["nodejs-20", "web", "python-3.11"]
 run = "npm run dev"
 hidden = [".config", ".git", "generated-icon.png", "node_modules", "dist"]
 
 [nix]
-channel = "stable-24_05"
+channel = "stable-25_05"
+packages = ["espeak-ng", "ffmpeg-full", "freetype", "gumbo", "harfbuzz", "jbig2dec", "lcms2", "libimagequant", "libjpeg", "libjpeg_turbo", "libtiff", "libwebp", "libxcrypt", "mupdf", "openjpeg", "poppler_utils", "swig", "tcl", "tesseract", "tk", "xcbuild", "zlib"]
 
 [deployment]
 deploymentTarget = "autoscale"
-build = ["npm", "run", "build"]
 run = ["npm", "run", "start"]
+build = ["npm", "run", "build"]
 
 [[ports]]
 localPort = 5000
