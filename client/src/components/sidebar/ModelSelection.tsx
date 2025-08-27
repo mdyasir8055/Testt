@@ -184,32 +184,66 @@ export function ModelSelection({ selectedModel, onModelChange }: ModelSelectionP
         </TabsContent>
         
         <TabsContent value="models" className="space-y-4">
-          <div className="space-y-2">
-            <Label className="text-xs">Select Model</Label>
-            <Select value={selectedModel} onValueChange={onModelChange}>
-              <SelectTrigger className="w-full" data-testid="select-model">
-                <SelectValue placeholder="Select a model">
-                  {selectedModel && getModelDisplay(selectedModel)}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {getAllAvailableModels().map((model) => (
-                  <SelectItem key={`${model.provider}-${model.id}`} value={model.id}>
-                    <div className="flex flex-col items-start">
-                      <span>{model.name}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {model.provider} • {model.contextLength ? `${model.contextLength} tokens` : 'Unknown context'}
-                      </span>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label className="text-xs">Select Model</Label>
+              <Select value={selectedModel} onValueChange={onModelChange}>
+                <SelectTrigger className="w-full" data-testid="select-model">
+                  <SelectValue placeholder="Select a model">
+                    {selectedModel && getModelDisplay(selectedModel)}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {getAllAvailableModels().map((model) => (
+                    <SelectItem key={`${model.provider}-${model.id}`} value={model.id}>
+                      <div className="flex flex-col items-start">
+                        <span>{model.name}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {model.provider} • {model.contextLength ? `${model.contextLength} tokens` : 'Unknown context'}
+                        </span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                  {getAllAvailableModels().length === 0 && (
+                    <SelectItem value="none" disabled>
+                      No models available - configure API keys first
+                    </SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Current Active Model Display */}
+            {selectedModel && (
+              <Card className="border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/20">
+                <CardContent className="p-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle className="h-4 w-4 text-green-600" />
+                      <div>
+                        <p className="text-sm font-medium text-green-900 dark:text-green-100">
+                          Active Model
+                        </p>
+                        <p className="text-xs text-green-700 dark:text-green-300">
+                          {getModelDisplay(selectedModel)}
+                        </p>
+                      </div>
                     </div>
-                  </SelectItem>
-                ))}
-                {getAllAvailableModels().length === 0 && (
-                  <SelectItem value="none" disabled>
-                    No models available - configure API keys first
-                  </SelectItem>
-                )}
-              </SelectContent>
-            </Select>
+                    <Badge variant="secondary" className="bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200">
+                      Ready
+                    </Badge>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Model Selection Instructions */}
+            {selectedModel && (
+              <div className="text-xs text-muted-foreground bg-muted/50 p-3 rounded-lg">
+                <p className="font-medium mb-1">✅ Model Configuration Complete</p>
+                <p>Your selected model is ready for use. All chat queries will now use <strong>{getModelDisplay(selectedModel)}</strong> to analyze your documents and provide responses.</p>
+              </div>
+            )}
           </div>
           
           {getAllAvailableModels().length === 0 && (
