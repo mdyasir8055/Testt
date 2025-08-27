@@ -299,16 +299,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Retry processing endpoint
+  app.post("/api/documents/:id/retry", async (req, res) => {
+    try {
+      const documentId = req.params.id;
+      await retryProcessing(documentId);
+      res.json({ success: true, message: "Processing retry initiated" });
+    } catch (error) {
+      console.error("Retry processing error:", error);
+      res.status(500).json({ error: "Failed to retry processing" });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }
 
 // Placeholder functions that would integrate with Python services
 async function processPDF(documentId: string, filePath: string): Promise<void> {
+  console.log(`Starting processing for document ${documentId}...`);
+  
   try {
     // This would call the Python PDF processing service
-    // Simulate enhanced processing with industry detection
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    // Simulate enhanced processing with industry detection - reduced timeout
+    await new Promise(resolve => setTimeout(resolve, 1500));
     
     // Simulate industry detection
     const industries = ['medical', 'finance', 'retail', 'education', 'legal', 'general'];
@@ -359,9 +373,20 @@ async function processPDF(documentId: string, filePath: string): Promise<void> {
       });
     }
     
+    console.log(`Successfully processed document ${documentId}`);
+    
   } catch (error) {
-    console.error("PDF processing error:", error);
+    console.error(`PDF processing error for ${documentId}:`, error);
     await storage.updateDocumentStatus(documentId, "error", { error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
+// Add endpoint to manually retry stuck documents
+async function retryProcessing(documentId: string): Promise<void> {
+  console.log(`Retrying processing for document ${documentId}...`);
+  const document = await storage.getDocument(documentId);
+  if (document && document.status === 'processing') {
+    await processPDF(documentId, `uploads/${document.filename}`);
   }
 }
 
