@@ -58,6 +58,9 @@ export class MemStorage implements IStorage {
       uploadedAt: new Date(),
       processedAt: null,
       chunkCount: 0,
+      status: insertDocument.status || "processing",
+      metadata: insertDocument.metadata || null,
+      industry: insertDocument.industry || null,
     };
     this.documents.set(id, document);
     return document;
@@ -109,6 +112,9 @@ export class MemStorage implements IStorage {
       id,
       createdAt: new Date(),
       updatedAt: new Date(),
+      mode: insertSession.mode || "standard",
+      title: insertSession.title ?? null,
+      settings: insertSession.settings || null,
     };
     this.chatSessions.set(id, session);
     return session;
@@ -139,6 +145,8 @@ export class MemStorage implements IStorage {
       ...insertMessage,
       id,
       createdAt: new Date(),
+      sources: insertMessage.sources || null,
+      metadata: insertMessage.metadata || null,
     };
     
     const messages = this.chatMessages.get(insertMessage.sessionId) || [];

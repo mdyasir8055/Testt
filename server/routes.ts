@@ -317,7 +317,7 @@ async function processPDF(documentId: string, filePath: string): Promise<void> {
     
   } catch (error) {
     console.error("PDF processing error:", error);
-    await storage.updateDocumentStatus(documentId, "error", { error: error.message });
+    await storage.updateDocumentStatus(documentId, "error", { error: error instanceof Error ? error.message : String(error) });
   }
 }
 
@@ -368,7 +368,7 @@ function getIndustryContext(industry: string): string {
     general: 'General document analysis and content extraction'
   };
   
-  return contexts[industry] || contexts.general;
+  return contexts[industry as keyof typeof contexts] || contexts.general;
 }
 
 async function processVoiceToText(audioData: string): Promise<string> {
@@ -417,7 +417,7 @@ async function getProviderModels(provider: string): Promise<ProviderModelsRespon
       provider,
       models: [],
       isValid: false,
-      error: error.message
+      error: error instanceof Error ? error.message : String(error)
     };
   }
 }
@@ -530,7 +530,7 @@ async function getHuggingFaceModels(apiKey: string): Promise<ProviderModelsRespo
       isValid: true
     };
   } catch (error) {
-    throw new Error(`HuggingFace API error: ${error.message}`);
+    throw new Error(`HuggingFace API error: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
