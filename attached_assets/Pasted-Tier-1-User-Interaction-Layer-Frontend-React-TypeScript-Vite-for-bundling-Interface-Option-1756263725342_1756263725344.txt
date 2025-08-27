@@ -1,0 +1,163 @@
+Tier)
+1. User Interaction Layer
+
+Frontend: React + TypeScript (Vite for bundling).
+
+Interface Options:
+
+Upload PDF(s).
+
+Choose chat LLM model (Groq, Google, Open-source).
+
+Type or speak a query (voice input via Whisper).
+
+View output as text or listen to it (TTS).
+
+Modes Available:
+
+Standard Q&A.
+
+Industry-Specific Mode (Medical, Finance, Retail Product, FAQ, Education).
+
+Comparison Mode (2 PDFs side-by-side).
+
+2. Document Processing Layer
+A. PDF Preprocessing
+
+Text Extraction → Use PyMuPDF (fast, free, reliable).
+
+Image/Diagram Extraction → Use pdf2image or PyMuPDF.
+
+Pass extracted images to OCR (Tesseract) if text is embedded.
+
+Optionally classify charts/diagrams (future).
+
+B. Splitting & Storage
+
+Text Stream:
+
+Chunk text into 500–1000 token windows (with overlaps).
+
+Generate embeddings using SentenceTransformers (MiniLM, mpnet) (free, local).
+
+Store in FAISS / Chroma vector DB.
+
+Image Stream:
+
+Convert diagrams/images to descriptions (OCR or lightweight vision model).
+
+Generate embeddings separately for images.
+
+Store in a separate FAISS index (so we keep text vectors & image vectors apart).
+
+➡️ This enables hybrid retrieval:
+
+Text query → retrieve from text embeddings.
+
+Image query (e.g., “explain this diagram”) → retrieve from image embeddings.
+
+3. Industry Template Detection
+
+After extraction, the system runs a classifier (rule-based + embeddings):
+
+If medical terms → classify as Medical.
+
+If finance/loan terms → classify as Finance.
+
+If product specs → classify as Retail Product.
+
+If Q&A format → classify as FAQ.
+
+If education keywords → classify as Education.
+
+Store template info in metadata with the vector DB.
+
+This auto-classification powers Industry-Specific Mode.
+
+4. Retrieval-Augmented Generation (RAG) Engine
+Query Handling Workflow:
+
+User query → Convert to embedding.
+
+Search relevant chunks in text vector DB.
+
+Also check image vector DB (if diagrams could help).
+
+Retrieve top-k results.
+
+Response Generation:
+
+Feed retrieved chunks + query into selected LLM (Groq, Google, or free local model).
+
+Generate answer grounded only on retrieved content.
+
+5. Feature-Specific Workflows
+✅ PDF Knowledge Retrieval (RAG)
+
+Standard text/image Q&A.
+
+Core of the system.
+
+✅ Multi-Industry Mode (Medical, Finance, Retail, FAQ, Education)
+
+Uses template classification + relevant embeddings.
+
+Optionally apply domain-specific embeddings (e.g., biomedical SentenceTransformers).
+
+✅ Comparison Mode
+
+User uploads 2 PDFs.
+
+Process each into separate vector DBs.
+
+Query is run on both → retrieve relevant chunks.
+
+LLM compares side-by-side → outputs differences.
+
+✅ Voice Assistant
+
+Speech-to-Text: OpenAI Whisper (local free version available).
+
+Process query through RAG.
+
+Answer returned.
+
+Text-to-Speech: pyttsx3 or gTTS for free audio output.
+
+✅ Regulatory Guardrails & Compliance
+
+Detect if user query is sensitive (e.g., medical advice, financial decision-making).
+
+If flagged → refuse or escalate message (no auto-answer).
+
+Rule-based + keyword detection (free + lightweight).
+
+✅ Multi-Modal Chat Model (Future-Ready)
+
+User selects LLM model (Groq, Google Gemini free-tier, or Hugging Face free models).
+
+Only affects chat model, embeddings remain SentenceTransformers (free).
+
+Backend ensures API key validation before using external models.
+
+✅ PDF Image Extraction & Detection
+
+Extracts and processes images separately.
+
+Image → OCR/text → embeddings → retrieval.
+
+Bot can explain diagrams with retrieved context.
+
+6. Backend (FastAPI)
+
+Routes:
+
+/upload_pdf → Preprocess, extract, chunk, embed, store.
+
+/query → RAG pipeline with text + image retrieval.
+
+/compare_pdfs → Dual retrieval + LLM comparison.
+
+/voice_query → Whisper STT → RAG → TTS.
+
+/select_model → Change chat LLM model dynamically.
