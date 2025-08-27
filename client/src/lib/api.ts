@@ -21,6 +21,11 @@ export const api = {
       return response.json();
     },
     
+    uploadFromUrl: async (url: string, userId?: string): Promise<Document> => {
+      const response = await apiRequest('POST', '/api/documents/upload-url', { url, userId });
+      return response.json();
+    },
+    
     getStatus: async (documentId: string): Promise<DocumentProcessingStatus> => {
       const response = await apiRequest('GET', `/api/documents/${documentId}/status`);
       return response.json();

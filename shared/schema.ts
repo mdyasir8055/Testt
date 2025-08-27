@@ -16,6 +16,8 @@ export const documents = pgTable("documents", {
   originalName: text("original_name").notNull(),
   size: integer("size").notNull(),
   mimeType: text("mime_type").notNull(),
+  sourceType: text("source_type").notNull().default("pdf"), // pdf, url
+  sourceUrl: text("source_url"), // for URL-based documents
   status: text("status").notNull().default("processing"), // processing, ready, error
   uploadedAt: timestamp("uploaded_at").notNull().defaultNow(),
   processedAt: timestamp("processed_at"),

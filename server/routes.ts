@@ -48,6 +48,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         originalName: req.file.originalname,
         size: req.file.size,
         mimeType: req.file.mimetype,
+        sourceType: "pdf",
+        sourceUrl: null,
         status: "processing",
         metadata: null,
         industry: null,
@@ -60,6 +62,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Upload error:", error);
       res.status(500).json({ error: "Failed to upload document" });
+    }
+  });
+
+  // URL upload and processing
+  app.post("/api/documents/upload-url", async (req, res) => {
+    try {
+      const { url, userId = "default-user" } = req.body;
+
+      if (!url) {
+        return res.status(400).json({ error: "URL is required" });
+      }
+
+      // Validate URL format
+      try {
+        new URL(url);
+      } catch {
+        return res.status(400).json({ error: "Invalid URL format" });
+      }
+
+      // Extract domain for document name
+      const urlObj = new URL(url);
+      const domain = urlObj.hostname.replace('www.', '');
+      const originalName = `${domain} - Web Content`;
+
+      const document = await storage.createDocument({
+        userId,
+        filename: `url_${Date.now()}.html`,
+        originalName,
+        size: 0, // Will be updated after content fetch
+        mimeType: "text/html",
+        sourceType: "url",
+        sourceUrl: url,
+        status: "processing",
+        metadata: { sourceUrl: url },
+        industry: null,
+      });
+
+      // Start processing URL content asynchronously
+      processUrlContent(document.id, url).catch(console.error);
+
+      res.json(document);
+    } catch (error) {
+      console.error("URL upload error:", error);
+      res.status(500).json({ error: "URL processing failed" });
     }
   });
 
@@ -313,6 +359,167 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   const httpServer = createServer(app);
   return httpServer;
+}
+
+// URL content processing function
+async function processUrlContent(documentId: string, url: string): Promise<void> {
+  console.log(`Starting URL processing for document ${documentId} from ${url}...`);
+  
+  try {
+    // Fetch content from URL
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+    
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; PDFKnowledgeBot/1.0)',
+      },
+      signal: controller.signal,
+    });
+    
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const html = await response.text();
+    
+    // Basic HTML content extraction (remove scripts, styles, etc.)
+    const textContent = extractTextFromHtml(html);
+    const contentSize = new TextEncoder().encode(textContent).length;
+    
+    // Detect industry based on content
+    const detectedIndustry = detectIndustryFromContent(textContent);
+    
+    // Create content chunks
+    const chunks = createContentChunks(textContent);
+    
+    // Update document status
+    await storage.updateDocumentStatus(documentId, "ready", {
+      pages: 1,
+      extractedText: textContent.length,
+      detectedIndustry,
+      chunkCount: chunks.length,
+      originalUrl: url,
+      contentSize,
+    });
+    
+    // Store chunks
+    for (let i = 0; i < chunks.length; i++) {
+      await storage.createDocumentChunk({
+        documentId,
+        content: chunks[i],
+        chunkIndex: i,
+        startPage: 1,
+        endPage: 1,
+        embedding: null,
+        metadata: { 
+          chunkType: "text", 
+          industry: detectedIndustry,
+          tokenCount: chunks[i].split(' ').length,
+          sourceUrl: url
+        },
+      });
+    }
+
+    // Update final document with industry metadata
+    const document = await storage.getDocument(documentId);
+    if (document) {
+      const updatedMetadata = {
+        ...(document.metadata || {}),
+        detectedIndustry,
+        processingComplete: true,
+        chunkCount: chunks.length,
+        contentSize,
+        originalUrl: url
+      };
+      
+      await storage.updateDocumentStatus(documentId, "ready", {
+        pages: 1,
+        extractedText: textContent.length,
+        detectedIndustry,
+        chunkCount: chunks.length,
+        metadata: updatedMetadata
+      });
+    }
+    
+    console.log(`Successfully processed URL content for document ${documentId}`);
+    
+  } catch (error) {
+    console.error(`URL processing error for ${documentId}:`, error);
+    await storage.updateDocumentStatus(documentId, "error", { 
+      error: error instanceof Error ? error.message : String(error),
+      originalUrl: url
+    });
+  }
+}
+
+function extractTextFromHtml(html: string): string {
+  // Remove script and style elements
+  const cleanHtml = html
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '')
+    .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '')
+    .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, '');
+  
+  // Extract text content
+  const textContent = cleanHtml
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  
+  return textContent;
+}
+
+function detectIndustryFromContent(content: string): string {
+  const industryKeywords = {
+    medical: ['health', 'medical', 'patient', 'diagnosis', 'treatment', 'clinical', 'hospital', 'doctor', 'medicine', 'pharmaceutical'],
+    finance: ['financial', 'investment', 'banking', 'credit', 'loan', 'insurance', 'portfolio', 'equity', 'revenue', 'profit'],
+    retail: ['product', 'shopping', 'price', 'discount', 'sale', 'customer', 'purchase', 'order', 'shipping', 'inventory'],
+    education: ['education', 'learning', 'course', 'student', 'teacher', 'university', 'school', 'academic', 'study', 'research'],
+    legal: ['legal', 'law', 'contract', 'agreement', 'attorney', 'court', 'litigation', 'compliance', 'regulation', 'policy']
+  };
+
+  const contentLower = content.toLowerCase();
+  let maxScore = 0;
+  let detectedIndustry = 'general';
+
+  for (const [industry, keywords] of Object.entries(industryKeywords)) {
+    const score = keywords.reduce((acc, keyword) => {
+      const matches = (contentLower.match(new RegExp(keyword, 'g')) || []).length;
+      return acc + matches;
+    }, 0);
+
+    if (score > maxScore) {
+      maxScore = score;
+      detectedIndustry = industry;
+    }
+  }
+
+  return detectedIndustry;
+}
+
+function createContentChunks(content: string, maxChunkSize: number = 1000): string[] {
+  const sentences = content.split(/[.!?]+/).filter(s => s.trim().length > 0);
+  const chunks: string[] = [];
+  let currentChunk = '';
+
+  for (const sentence of sentences) {
+    if (currentChunk.length + sentence.length > maxChunkSize && currentChunk.length > 0) {
+      chunks.push(currentChunk.trim());
+      currentChunk = sentence.trim();
+    } else {
+      currentChunk += (currentChunk ? '. ' : '') + sentence.trim();
+    }
+  }
+
+  if (currentChunk.trim()) {
+    chunks.push(currentChunk.trim());
+  }
+
+  return chunks.length > 0 ? chunks : [content.substring(0, maxChunkSize)];
 }
 
 // Placeholder functions that would integrate with Python services
