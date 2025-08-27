@@ -40,7 +40,7 @@ class RAGEngine:
         Returns:
             Dict containing answer, sources, and metadata
         """
-        max_sources = max_sources or self.max_sources
+        max_sources = max_sources if max_sources is not None else self.max_sources
         
         # Step 1: Retrieve relevant chunks
         search_results = self.vector_store.search(

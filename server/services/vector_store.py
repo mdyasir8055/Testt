@@ -36,7 +36,7 @@ class VectorStore:
         """
         # Store document metadata
         self.documents[document_id] = {
-            'metadata': document_metadata or {},
+            'metadata': document_metadata if document_metadata is not None else {},
             'chunk_count': len(chunks),
             'chunk_ids': []
         }
