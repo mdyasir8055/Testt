@@ -65,6 +65,11 @@ export const api = {
       const response = await apiRequest('POST', '/api/chat/text-to-speech', { text, voice });
       return response.json();
     },
+    
+    compare: async (documentIds: string[], question: string): Promise<QueryResponse> => {
+      const response = await apiRequest('POST', '/api/chat/compare', { documentIds, question });
+      return response.json();
+    },
   },
 
   // Model and API key management

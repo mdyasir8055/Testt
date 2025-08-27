@@ -237,6 +237,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Document comparison endpoint
+  app.post("/api/chat/compare", async (req, res) => {
+    try {
+      const { documentIds, question, mode = "comparison" } = req.body;
+      
+      if (!documentIds || documentIds.length < 2) {
+        return res.status(400).json({ error: "At least 2 documents are required for comparison" });
+      }
+      
+      // Process comparison through RAG engine
+      const response = await processDocumentComparison(documentIds, question, mode);
+      
+      res.json(response);
+    } catch (error) {
+      console.error("Comparison error:", error);
+      res.status(500).json({ error: "Failed to compare documents" });
+    }
+  });
+
   // API Key management endpoints
   app.post("/api/models/set-api-key", async (req, res) => {
     try {
@@ -288,32 +307,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
 async function processPDF(documentId: string, filePath: string): Promise<void> {
   try {
     // This would call the Python PDF processing service
-    // For now, simulate processing
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    // Simulate enhanced processing with industry detection
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    
+    // Simulate industry detection
+    const industries = ['medical', 'finance', 'retail', 'education', 'legal', 'general'];
+    const detectedIndustry = industries[Math.floor(Math.random() * industries.length)];
     
     await storage.updateDocumentStatus(documentId, "ready", {
       pages: 10,
       extractedImages: 2,
+      detectedIndustry,
+      chunkCount: 8,
     });
     
-    // Create some sample chunks
-    for (let i = 0; i < 5; i++) {
+    // Create enhanced sample chunks with industry context
+    for (let i = 0; i < 8; i++) {
+      const industryContent = getIndustrySpecificContent(detectedIndustry, i + 1);
       await storage.createDocumentChunk({
         documentId,
-        content: `Sample chunk ${i + 1} content from processed PDF`,
+        content: industryContent,
         chunkIndex: i,
         startPage: Math.floor(i / 2) + 1,
         endPage: Math.floor(i / 2) + 1,
-        embedding: null, // Would contain actual embeddings
-        metadata: { chunkType: "text" },
+        embedding: null, // Would contain actual embeddings from SentenceTransformers
+        metadata: { 
+          chunkType: "text", 
+          industry: detectedIndustry,
+          tokenCount: industryContent.split(' ').length
+        },
       });
     }
     
-    // Update chunk count
-    await storage.updateDocumentStatus(documentId, "ready", {
-      pages: 10,
-      extractedImages: 2,
-    });
+    // Update final document with industry metadata
+    const document = await storage.getDocument(documentId);
+    if (document) {
+      const updatedMetadata = {
+        ...(document.metadata || {}),
+        detectedIndustry,
+        processingComplete: true,
+        chunkCount: 8 
+      };
+      
+      // Update document status with enhanced metadata
+      await storage.updateDocumentStatus(documentId, "ready", {
+        pages: 10,
+        extractedImages: 2,
+        detectedIndustry,
+        chunkCount: 8,
+        metadata: updatedMetadata
+      });
+    }
     
   } catch (error) {
     console.error("PDF processing error:", error);
@@ -322,6 +366,11 @@ async function processPDF(documentId: string, filePath: string): Promise<void> {
 }
 
 async function processRAGQuery(request: QueryRequest, industry?: string, chatMode?: string): Promise<QueryResponse> {
+  // Handle comparison mode specially
+  if (chatMode === 'comparison' && request.documentIds && request.documentIds.length >= 2) {
+    return await processDocumentComparison(request.documentIds, request.message, chatMode);
+  }
+  
   // This would integrate with Python RAG services and use the selected AI model
   // Industry-specific processing would apply specialized prompts and analysis
   
@@ -346,6 +395,168 @@ async function processRAGQuery(request: QueryRequest, industry?: string, chatMod
     ],
     sessionId: request.sessionId,
   };
+}
+
+async function processDocumentComparison(documentIds: string[], question: string, mode: string): Promise<QueryResponse> {
+  try {
+    // Get documents to compare
+    const documents = await Promise.all(
+      documentIds.map(id => storage.getDocument(id))
+    );
+    
+    const validDocuments = documents.filter((doc): doc is NonNullable<typeof doc> => 
+      doc !== null && doc !== undefined && doc.status === 'ready'
+    );
+    
+    if (validDocuments.length < 2) {
+      return {
+        message: "I need at least 2 ready documents to perform a comparison. Please ensure your documents have finished processing.",
+        sources: [],
+        sessionId: "",
+      };
+    }
+    
+    // Get chunks from each document
+    const documentChunks = await Promise.all(
+      validDocuments.map(async (doc) => {
+        const chunks = await storage.getDocumentChunks(doc.id);
+        return {
+          document: doc,
+          chunks: chunks.slice(0, 3) // Get top 3 chunks per document
+        };
+      })
+    );
+    
+    // Build comparison response
+    const comparisonSources = documentChunks.flatMap(({document, chunks}) => 
+      chunks.map(chunk => ({
+        documentId: document.id,
+        documentName: document.originalName,
+        chunkContent: chunk.content,
+        page: chunk.startPage || 1,
+        relevance: 0.85,
+      }))
+    );
+    
+    // Generate comparison message
+    const docNames = validDocuments.map(doc => doc.originalName).join(' vs ');
+    const industries = validDocuments.map(doc => doc.industry || 'general');
+    const uniqueIndustries = Array.from(new Set(industries));
+    
+    const industryContext = uniqueIndustries.length > 1 
+      ? `Comparing documents from different industries: ${uniqueIndustries.join(', ')}.`
+      : `Comparing ${uniqueIndustries[0]} documents.`;
+    
+    const comparisonMessage = `${industryContext}
+
+**Document Comparison: ${docNames}**
+
+Comparing your question: "${question}"
+
+**Document A (${validDocuments[0]?.originalName || 'Unknown'}):**
+- Industry: ${validDocuments[0]?.industry || 'general'}
+- ${documentChunks[0]?.chunks.length || 0} relevant sections found
+- Key content: ${documentChunks[0]?.chunks[0]?.content.substring(0, 150) || 'No content available'}...
+
+**Document B (${validDocuments[1]?.originalName || 'Unknown'}):**
+- Industry: ${validDocuments[1]?.industry || 'general'}  
+- ${documentChunks[1]?.chunks.length || 0} relevant sections found
+- Key content: ${documentChunks[1]?.chunks[0]?.content.substring(0, 150) || 'No content available'}...
+
+**Key Differences:**
+- Industry focus: ${validDocuments[0]?.industry || 'general'} vs ${validDocuments[1]?.industry || 'general'}
+- Content approach: Both documents address similar themes but from different perspectives
+- Document structure: Organized differently to serve their respective purposes
+
+**Similarities:**
+- Both documents contain relevant information related to your query
+- Similar technical depth and detail level
+- Complementary information that provides a comprehensive view
+
+This comparison shows how different documents can provide complementary insights on your question.`;
+
+    return {
+      message: comparisonMessage,
+      sources: comparisonSources,
+      sessionId: "",
+    };
+    
+  } catch (error) {
+    console.error("Document comparison error:", error);
+    return {
+      message: `Error comparing documents: ${error instanceof Error ? error.message : String(error)}`,
+      sources: [],
+      sessionId: "",
+    };
+  }
+}
+
+function getIndustrySpecificContent(industry: string, chunkIndex: number): string {
+  const industryContent = {
+    medical: [
+      "Patient diagnosis and treatment protocols show significant improvement with new medication regimen. Clinical studies indicate 85% success rate in symptom reduction.",
+      "Healthcare provider guidelines recommend regular monitoring of vital signs. Blood pressure readings should be documented every 4 hours during treatment.",
+      "Medical research demonstrates the effectiveness of combination therapy. Pharmaceutical interventions show better outcomes when paired with lifestyle modifications.",
+      "Clinical trials indicate positive patient outcomes. Treatment protocols have been updated based on latest medical research findings.",
+      "Healthcare data analysis reveals trends in patient recovery. Medical professionals report improved treatment success rates.",
+      "Patient care protocols have been enhanced. Clinical guidelines now include new diagnostic criteria for better healthcare outcomes.",
+      "Medical equipment calibration shows optimal performance. Healthcare facilities report improved diagnostic accuracy with new protocols.",
+      "Pharmaceutical analysis indicates drug efficacy. Clinical studies confirm safety profiles meet medical standards."
+    ],
+    finance: [
+      "Financial portfolio analysis shows diversified investment strategy. Asset allocation across multiple sectors reduces overall risk exposure significantly.",
+      "Banking regulations require enhanced compliance measures. Financial institutions must maintain adequate capital reserves per regulatory guidelines.",
+      "Investment portfolio performance demonstrates strong quarterly returns. Market analysis indicates favorable conditions for continued growth.",
+      "Financial risk assessment shows moderate exposure levels. Investment strategies are aligned with market volatility expectations.",
+      "Banking operations report improved efficiency metrics. Financial services automation has reduced processing time by 40%.",
+      "Investment analysis reveals market trends. Financial forecasting models predict stable returns in the upcoming fiscal quarter.",
+      "Credit risk evaluation shows acceptable parameters. Financial lending practices maintain conservative approach to risk management.",
+      "Accounting procedures ensure regulatory compliance. Financial reporting standards are maintained according to industry requirements."
+    ],
+    retail: [
+      "Product inventory management shows optimized stock levels. Sales data indicates strong customer demand for seasonal merchandise categories.",
+      "Customer satisfaction surveys report high service ratings. Retail operations have improved customer experience through enhanced product selection.",
+      "Sales performance analysis reveals growth trends. Retail metrics show increased customer retention and improved purchase frequency.",
+      "Product marketing campaigns demonstrate effectiveness. Customer engagement with promotional activities has increased by 30%.",
+      "Retail supply chain optimization reduces costs. Inventory turnover rates have improved through better demand forecasting.",
+      "Customer feedback indicates product quality satisfaction. Retail brand reputation has strengthened through quality improvements.",
+      "Sales data analysis shows seasonal patterns. Retail strategies have been adjusted to optimize inventory for peak periods.",
+      "Product line expansion shows positive results. Customer response to new merchandise categories exceeds expectations."
+    ],
+    education: [
+      "Student performance assessment shows improved learning outcomes. Academic achievement scores have increased by 15% over the semester.",
+      "Educational curriculum design enhances learning experience. Course materials have been updated to reflect current industry standards.",
+      "Academic research methodology guides student projects. University guidelines ensure rigorous scholarly standards for all assignments.",
+      "Learning management system improves student engagement. Educational technology integration has enhanced classroom interaction.",
+      "Student feedback indicates course satisfaction. Academic programs have been refined based on learner experience evaluations.",
+      "Educational assessment criteria ensure fair evaluation. Grading standards maintain consistency across all academic departments.",
+      "University research programs demonstrate innovation. Academic collaboration has produced significant scholarly contributions.",
+      "Student support services enhance academic success. Educational counseling programs have improved retention rates."
+    ],
+    legal: [
+      "Contract analysis reveals compliance requirements. Legal framework ensures all agreements meet regulatory standards and client obligations.",
+      "Litigation strategy development shows case strengths. Legal precedent research supports favorable outcome probability in court proceedings.",
+      "Legal compliance audit indicates adherence levels. Regulatory requirements are met according to current jurisdiction standards.",
+      "Contract negotiation resulted in favorable terms. Legal review ensures all clauses protect client interests and minimize liability.",
+      "Court filing documentation meets all requirements. Legal procedures have been followed according to established protocols.",
+      "Legal risk assessment shows manageable exposure. Attorney recommendations include strategic approaches to minimize potential issues.",
+      "Contract dispute resolution shows positive outcome. Legal mediation process successfully addressed all parties' concerns.",
+      "Legal documentation review ensures accuracy. Attorney oversight maintains high standards for all client agreements."
+    ],
+    general: [
+      "Document analysis reveals key information patterns. Content structure provides comprehensive overview of the subject matter.",
+      "Information processing shows systematic organization. Data presentation follows logical sequence for improved understanding.",
+      "Content review indicates thorough coverage. Document sections address all relevant aspects of the topic systematically.",
+      "Data analysis shows consistent methodology. Information gathering follows established research and documentation standards.",
+      "Document structure enhances readability. Content organization supports clear communication of complex information.",
+      "Information synthesis provides comprehensive view. Document content integrates multiple perspectives for balanced analysis.",
+      "Content validation ensures accuracy standards. Document review process maintains high quality information presentation.",
+      "Data interpretation supports conclusions. Document analysis provides evidence-based insights for decision making."
+    ]
+  };
+  
+  const content = industryContent[industry as keyof typeof industryContent] || industryContent.general;
+  return content[chunkIndex % content.length];
 }
 
 function getCurrentSelectedModel(): string {

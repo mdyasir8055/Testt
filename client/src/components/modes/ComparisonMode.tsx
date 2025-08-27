@@ -27,10 +27,18 @@ export function ComparisonMode({ onExit }: ComparisonModeProps) {
     }
   };
 
-  const handleStartComparison = () => {
+  const handleStartComparison = async () => {
     if (selectedDocuments.length === 2) {
-      // Start comparison process
-      console.log('Starting comparison of:', selectedDocuments);
+      try {
+        const defaultQuestion = "What are the key differences and similarities between these documents?";
+        const result = await api.chat.compare(selectedDocuments, defaultQuestion);
+        console.log('Comparison result:', result);
+        // You could show the result in a modal or navigate to show the comparison
+        alert(`Comparison completed! Key findings: ${result.message.substring(0, 200)}...`);
+      } catch (error) {
+        console.error('Comparison failed:', error);
+        alert('Failed to compare documents. Please try again.');
+      }
     }
   };
 

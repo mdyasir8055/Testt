@@ -15,13 +15,13 @@ class PDFProcessor:
     
     def extract_content(self, pdf_path: str) -> Dict:
         """
-        Extract text and images from PDF file.
+        Extract text and images from PDF file with industry auto-detection.
         
         Args:
             pdf_path: Path to the PDF file
             
         Returns:
-            Dict containing extracted content, metadata, and images
+            Dict containing extracted content, metadata, images, and detected industry
         """
         try:
             doc = fitz.open(pdf_path)
@@ -34,7 +34,9 @@ class PDFProcessor:
                     'title': doc.metadata.get('title', ''),
                     'author': doc.metadata.get('author', ''),
                     'subject': doc.metadata.get('subject', ''),
-                }
+                },
+                'industry': 'general',
+                'confidence_score': 0.0
             }
             
             for page_num in range(len(doc)):
