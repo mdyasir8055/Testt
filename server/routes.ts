@@ -371,30 +371,172 @@ async function processRAGQuery(request: QueryRequest, industry?: string, chatMod
     return await processDocumentComparison(request.documentIds, request.message, chatMode);
   }
   
-  // This would integrate with Python RAG services and use the selected AI model
-  // Industry-specific processing would apply specialized prompts and analysis
-  
-  const selectedModel = getCurrentSelectedModel(); // Get from API key storage
-  const industryContext = getIndustryContext(industry || 'general');
-  
-  // For now, return a structured response that reflects the industry and mode
-  const industrySpecificMessage = industry && industry !== 'general' 
-    ? `Analyzing your ${industry} document with specialized ${industry} knowledge. ` 
-    : '';
+  try {
+    // Get the configured API key and model
+    const { provider, model, apiKey } = getConfiguredModel();
     
-  return {
-    message: `${industrySpecificMessage}I understand you're asking: "${request.message}". Based on your uploaded documents and using ${selectedModel || 'default'} model, I can help analyze and answer questions about the content.`,
-    sources: [
-      {
-        documentId: "sample-doc-1",
-        documentName: "uploaded-document.pdf",
-        chunkContent: "Relevant content chunk from the document that was used to generate this response.",
-        page: 1,
-        relevance: 0.95,
-      },
-    ],
-    sessionId: request.sessionId,
-  };
+    if (!apiKey) {
+      return {
+        message: "No AI model is configured. Please set up your API key in the Model Configuration section.",
+        sources: [],
+        sessionId: request.sessionId,
+      };
+    }
+
+    // Get relevant document chunks for the query
+    const documentChunks = await getRelevantChunks(request.message, request.documentIds);
+    
+    // Build context from document chunks
+    const context = documentChunks.map(chunk => 
+      `Document: ${chunk.documentName} (Page ${chunk.page})\n${chunk.content}`
+    ).join('\n\n');
+    
+    // Create industry-specific prompt
+    const industryContext = getIndustryContext(industry || 'general');
+    const systemPrompt = `You are an AI assistant specialized in ${industryContext}. 
+    
+Use the following document context to answer the user's question. Be specific and cite the relevant documents and pages.
+If the context doesn't contain relevant information, say so clearly.
+
+DOCUMENT CONTEXT:
+${context || 'No relevant document content found.'}`;
+
+    // Make API call to the configured LLM
+    const response = await callLLMAPI(provider, model, apiKey, systemPrompt, request.message);
+    
+    return {
+      message: response,
+      sources: documentChunks.map(chunk => ({
+        documentId: chunk.documentId,
+        documentName: chunk.documentName,
+        chunkContent: chunk.content.substring(0, 200) + '...',
+        page: chunk.page,
+        relevance: 0.85,
+      })),
+      sessionId: request.sessionId,
+    };
+    
+  } catch (error) {
+    console.error("RAG Query error:", error);
+    return {
+      message: `I encountered an error while processing your question: ${error instanceof Error ? error.message : String(error)}. Please try again or check your API configuration.`,
+      sources: [],
+      sessionId: request.sessionId,
+    };
+  }
+}
+
+function getConfiguredModel(): { provider: string; model: string; apiKey: string } {
+  // Get the first configured provider
+  for (const [provider, apiKey] of Object.entries(apiKeys)) {
+    if (apiKey) {
+      // Default to a commonly available model for each provider
+      const defaultModels = {
+        groq: 'llama3-70b-8192',
+        gemini: 'gemini-pro',
+        huggingface: 'microsoft/DialoGPT-large'
+      };
+      
+      return {
+        provider,
+        model: defaultModels[provider as keyof typeof defaultModels] || 'default',
+        apiKey
+      };
+    }
+  }
+  
+  return { provider: '', model: '', apiKey: '' };
+}
+
+async function getRelevantChunks(query: string, documentIds?: string[]): Promise<Array<{
+  documentId: string;
+  documentName: string;
+  content: string;
+  page: number;
+}>> {
+  try {
+    // Get user documents
+    const documents = await storage.getUserDocuments("default-user");
+    const relevantDocs = documentIds 
+      ? documents.filter(doc => documentIds.includes(doc.id))
+      : documents.filter(doc => doc.status === 'ready');
+    
+    if (relevantDocs.length === 0) {
+      return [];
+    }
+    
+    // Get chunks from documents (simplified - in real implementation would use vector search)
+    const allChunks = [];
+    for (const doc of relevantDocs.slice(0, 3)) { // Limit to 3 docs for performance
+      const chunks = await storage.getDocumentChunks(doc.id);
+      
+      // Simple keyword matching (in real implementation would use embeddings)
+      const queryWords = query.toLowerCase().split(' ').filter(word => word.length > 3);
+      const relevantChunks = chunks
+        .filter(chunk => 
+          queryWords.some(word => chunk.content.toLowerCase().includes(word))
+        )
+        .slice(0, 2) // Top 2 chunks per document
+        .map(chunk => ({
+          documentId: doc.id,
+          documentName: doc.originalName,
+          content: chunk.content,
+          page: chunk.startPage || 1
+        }));
+      
+      allChunks.push(...relevantChunks);
+    }
+    
+    return allChunks.slice(0, 5); // Limit total chunks
+  } catch (error) {
+    console.error("Error getting relevant chunks:", error);
+    return [];
+  }
+}
+
+async function callLLMAPI(provider: string, model: string, apiKey: string, systemPrompt: string, userMessage: string): Promise<string> {
+  try {
+    switch (provider.toLowerCase()) {
+      case 'groq':
+        return await callGroqAPI(model, apiKey, systemPrompt, userMessage);
+      case 'gemini':
+      case 'google':
+        return await callGeminiAPI(model, apiKey, systemPrompt, userMessage);
+      case 'huggingface':
+        return await callHuggingFaceAPI(model, apiKey, systemPrompt, userMessage);
+      default:
+        throw new Error(`Unsupported provider: ${provider}`);
+    }
+  } catch (error) {
+    throw new Error(`LLM API call failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+async function callGroqAPI(model: string, apiKey: string, systemPrompt: string, userMessage: string): Promise<string> {
+  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      model: model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userMessage }
+      ],
+      max_tokens: 1000,
+      temperature: 0.7
+    })
+  });
+  
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Groq API error: ${response.status} - ${error}`);
+  }
+  
+  const data = await response.json();
+  return data.choices[0]?.message?.content || "I couldn't generate a response. Please try again.";
 }
 
 async function processDocumentComparison(documentIds: string[], question: string, mode: string): Promise<QueryResponse> {
@@ -743,6 +885,62 @@ async function getHuggingFaceModels(apiKey: string): Promise<ProviderModelsRespo
   } catch (error) {
     throw new Error(`HuggingFace API error: ${error instanceof Error ? error.message : String(error)}`);
   }
+}
+
+async function callGeminiAPI(model: string, apiKey: string, systemPrompt: string, userMessage: string): Promise<string> {
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      contents: [{
+        parts: [{ text: `${systemPrompt}\n\nUser: ${userMessage}` }]
+      }],
+      generationConfig: {
+        maxOutputTokens: 1000,
+        temperature: 0.7
+      }
+    })
+  });
+  
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Gemini API error: ${response.status} - ${error}`);
+  }
+  
+  const data = await response.json();
+  return data.candidates[0]?.content?.parts[0]?.text || "I couldn't generate a response. Please try again.";
+}
+
+async function callHuggingFaceAPI(model: string, apiKey: string, systemPrompt: string, userMessage: string): Promise<string> {
+  const response = await fetch(`https://api-inference.huggingface.co/models/${model}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      inputs: `${systemPrompt}\n\nUser: ${userMessage}`,
+      parameters: {
+        max_new_tokens: 1000,
+        temperature: 0.7,
+        do_sample: true
+      }
+    })
+  });
+  
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Hugging Face API error: ${response.status} - ${error}`);
+  }
+  
+  const data = await response.json();
+  if (Array.isArray(data) && data[0]?.generated_text) {
+    return data[0].generated_text.replace(`${systemPrompt}\n\nUser: ${userMessage}`, '').trim();
+  }
+  
+  return "I couldn't generate a response. Please try again.";
 }
 
 async function testAPIKey(provider: string, apiKey: string): Promise<boolean> {
