@@ -761,10 +761,16 @@ async function processVoiceToText(audioData: string): Promise<string> {
   return "This is a transcription of the voice input.";
 }
 
-async function processTextToSpeech(text: string, voice: string): Promise<string> {
-  // This would use TTS service to generate audio
-  // For now, return placeholder base64 audio data
-  return "base64-encoded-audio-data";
+async function processTextToSpeech(text: string, voice?: string): Promise<string> {
+  try {
+    // For browser compatibility, we'll implement client-side TTS
+    // Return empty string to signal client should handle TTS
+    console.log(`TTS requested for: "${text.substring(0, 50)}..."`);
+    return "";
+  } catch (error) {
+    console.error("TTS error:", error);
+    return "";
+  }
 }
 
 async function getProviderModels(provider: string): Promise<ProviderModelsResponse> {

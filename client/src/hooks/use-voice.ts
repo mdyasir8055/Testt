@@ -91,31 +91,37 @@ export function useVoice() {
 
   const playAudio = useCallback(async (text: string, voice?: string) => {
     try {
-      const response = await api.chat.textToSpeech(text, voice);
-      if (!response?.audioData) {
-        console.warn('No audio data received');
-        return;
+      // Use browser's built-in Web Speech API for text-to-speech
+      if ('speechSynthesis' in window) {
+        const utterance = new SpeechSynthesisUtterance(text);
+        
+        // Configure voice settings
+        utterance.rate = 0.9;
+        utterance.pitch = 1;
+        utterance.volume = 0.8;
+        
+        // Set voice if available
+        if (voice) {
+          const voices = speechSynthesis.getVoices();
+          const selectedVoice = voices.find(v => v.name.includes(voice) || v.lang.includes(voice));
+          if (selectedVoice) {
+            utterance.voice = selectedVoice;
+          }
+        }
+        
+        return new Promise<void>((resolve, reject) => {
+          utterance.onend = () => resolve();
+          utterance.onerror = (error) => {
+            console.error('Speech synthesis error:', error);
+            reject(error);
+          };
+          
+          speechSynthesis.speak(utterance);
+        });
+      } else {
+        console.warn('Speech synthesis not supported in this browser');
+        throw new Error('Text-to-speech not supported');
       }
-      
-      // Convert base64 to blob and play
-      const audioBlob = base64ToBlob(response.audioData, 'audio/mpeg');
-      const audioUrl = URL.createObjectURL(audioBlob);
-      const audio = new Audio(audioUrl);
-      
-      return new Promise<void>((resolve, reject) => {
-        audio.onended = () => {
-          URL.revokeObjectURL(audioUrl);
-          resolve();
-        };
-        audio.onerror = (error) => {
-          console.error('Audio playback error:', error);
-          URL.revokeObjectURL(audioUrl);
-          reject(error);
-        };
-        audio.onloadeddata = () => {
-          audio.play().catch(reject);
-        };
-      });
     } catch (error) {
       console.error('Error playing audio:', error);
       throw error;
