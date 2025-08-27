@@ -418,13 +418,19 @@ async function processRAGQuery(request: QueryRequest, industry?: string, chatMod
     
     // Create industry-specific prompt
     const industryContext = getIndustryContext(industry || 'general');
-    const systemPrompt = `You are an AI assistant specialized in ${industryContext}. 
-    
-Use the following document context to answer the user's question. Be specific and cite the relevant documents and pages.
-If the context doesn't contain relevant information, say so clearly.
+    const systemPrompt = `You are an expert AI assistant specializing in ${industryContext}.
+
+Your task: Provide comprehensive, helpful answers using the document content provided below.
 
 DOCUMENT CONTEXT:
-${context || 'No relevant document content found.'}`;
+${context || 'No specific document content available for this query.'}
+
+Instructions:
+- Answer confidently using the available document information
+- Reference specific documents and page numbers when available  
+- Provide detailed, informative responses
+- If the question can be answered using the context, do so thoroughly
+- Only mention insufficient information if the question is completely unrelated to any provided content`;
 
     // Make API call to the configured LLM
     const response = await callLLMAPI(provider, model, apiKey, systemPrompt, request.message);

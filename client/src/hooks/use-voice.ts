@@ -28,14 +28,19 @@ export function useVoice() {
         setIsListening(false);
         setIsProcessing(true);
         
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
-        const base64Audio = await blobToBase64(audioBlob);
-        
-        // Clean up stream
-        stream.getTracks().forEach(track => track.stop());
-        setIsProcessing(false);
-        
-        return base64Audio;
+        try {
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+          const base64Audio = await blobToBase64(audioBlob);
+          
+          // Clean up stream
+          stream.getTracks().forEach(track => track.stop());
+          return base64Audio;
+        } catch (error) {
+          console.error('Error processing audio:', error);
+          return '';
+        } finally {
+          setIsProcessing(false);
+        }
       };
 
       mediaRecorder.start();
@@ -48,11 +53,35 @@ export function useVoice() {
   const stopListening = useCallback((): Promise<string> => {
     return new Promise((resolve) => {
       if (mediaRecorderRef.current && isListening) {
-        const originalOnStop = mediaRecorderRef.current.onstop;
-        mediaRecorderRef.current.onstop = async (event) => {
-          const result = await originalOnStop?.(event);
-          resolve(result as string);
+        let audioResult = '';
+        
+        const handleStop = async () => {
+          try {
+            setIsListening(false);
+            setIsProcessing(true);
+            
+            const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+            audioResult = await blobToBase64(audioBlob);
+            
+            // Clean up stream
+            // Clean up stream tracks
+          if (mediaRecorderRef.current) {
+            const stream = mediaRecorderRef.current.stream;
+            if (stream) {
+              stream.getTracks().forEach(track => track.stop());
+            }
+          }
+            
+            resolve(audioResult);
+          } catch (error) {
+            console.error('Error in stopListening:', error);
+            resolve('');
+          } finally {
+            setIsProcessing(false);
+          }
         };
+        
+        mediaRecorderRef.current.onstop = handleStop;
         mediaRecorderRef.current.stop();
       } else {
         resolve('');
@@ -62,10 +91,14 @@ export function useVoice() {
 
   const playAudio = useCallback(async (text: string, voice?: string) => {
     try {
-      const { audioData } = await api.chat.textToSpeech(text, voice);
+      const response = await api.chat.textToSpeech(text, voice);
+      if (!response?.audioData) {
+        console.warn('No audio data received');
+        return;
+      }
       
       // Convert base64 to blob and play
-      const audioBlob = base64ToBlob(audioData, 'audio/wav');
+      const audioBlob = base64ToBlob(response.audioData, 'audio/mpeg');
       const audioUrl = URL.createObjectURL(audioBlob);
       const audio = new Audio(audioUrl);
       
@@ -74,11 +107,18 @@ export function useVoice() {
           URL.revokeObjectURL(audioUrl);
           resolve();
         };
-        audio.onerror = reject;
-        audio.play();
+        audio.onerror = (error) => {
+          console.error('Audio playback error:', error);
+          URL.revokeObjectURL(audioUrl);
+          reject(error);
+        };
+        audio.onloadeddata = () => {
+          audio.play().catch(reject);
+        };
       });
     } catch (error) {
       console.error('Error playing audio:', error);
+      throw error;
     }
   }, []);
 
