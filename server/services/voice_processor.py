@@ -10,6 +10,8 @@ from typing import Optional, Union, Dict
 from pathlib import Path
 import wave
 import json
+from typing import List
+
 
 # Try to import optional dependencies
 try:
