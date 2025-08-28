@@ -36,6 +36,28 @@ export const api = {
       const response = await apiRequest('GET', `/api/documents${params}`);
       return response.json();
     },
+
+    listWithStatus: async (userId?: string): Promise<(Document & { progress?: number })[]> => {
+      const docs = await api.documents.list(userId);
+      // Fetch status for processing docs in parallel
+      const results = await Promise.all(docs.map(async d => {
+        if (d.status === 'processing') {
+          try {
+            const s = await api.documents.getStatus(d.id);
+            return { ...d, progress: s.progress };
+          } catch {
+            return d;
+          }
+        }
+        return d;
+      }));
+      return results;
+    },
+
+    delete: async (documentId: string): Promise<{ success: boolean }> => {
+      const response = await apiRequest('DELETE', `/api/documents/${documentId}`);
+      return response.json();
+    },
   },
   
   // Chat operations
@@ -73,6 +95,11 @@ export const api = {
     
     compare: async (documentIds: string[], question: string): Promise<QueryResponse> => {
       const response = await apiRequest('POST', '/api/chat/compare', { documentIds, question });
+      return response.json();
+    },
+
+    clearHistory: async (sessionId: string): Promise<{ success: boolean }> => {
+      const response = await apiRequest('DELETE', `/api/chat/sessions/${sessionId}/messages`);
       return response.json();
     },
   },

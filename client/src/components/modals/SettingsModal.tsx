@@ -1,30 +1,57 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Slider } from '@/components/ui/slider';
+import { useToast } from '@/hooks/use-toast';
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
+// Default settings
+const defaultSettings = {
+  extractImages: true,
+  enableOCR: true,
+  autoDetectIndustry: false,
+  chunkSize: 750,
+  responseLength: 'medium',
+  voiceSpeed: 1.0,
+  voiceLanguage: 'en-US',
+};
+
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
-  const [settings, setSettings] = useState({
-    extractImages: true,
-    enableOCR: true,
-    autoDetectIndustry: false,
-    chunkSize: 750,
-    responseLength: 'medium',
-    voiceSpeed: 1.0,
-    voiceLanguage: 'en-US',
-  });
+  const [settings, setSettings] = useState(defaultSettings);
+  const { toast } = useToast();
+
+  // Load settings from localStorage on mount
+  useEffect(() => {
+    const savedSettings = localStorage.getItem('ragChatSettings');
+    if (savedSettings) {
+      try {
+        const parsedSettings = JSON.parse(savedSettings);
+        setSettings({ ...defaultSettings, ...parsedSettings });
+      } catch (error) {
+        console.error('Error parsing saved settings:', error);
+      }
+    }
+  }, [isOpen]); // Reload when modal opens
 
   const handleSave = () => {
-    // Save settings to local storage or API
+    // Save settings to local storage
     localStorage.setItem('ragChatSettings', JSON.stringify(settings));
+    
+    // Apply settings to the application
+    document.documentElement.style.setProperty('--voice-speed', settings.voiceSpeed.toString());
+    
+    toast({
+      title: "Settings saved",
+      description: "Your preferences have been updated.",
+    });
+    
     onClose();
   };
 
@@ -33,6 +60,14 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       ...prev,
       [key]: value,
     }));
+  };
+
+  const handleReset = () => {
+    setSettings(defaultSettings);
+    toast({
+      title: "Settings reset",
+      description: "All settings have been reset to defaults.",
+    });
   };
 
   return (
@@ -48,38 +83,41 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             <div className="space-y-3">
               <div className="flex items-center space-x-2">
                 <Checkbox
+                  id="extractImages"
                   checked={settings.extractImages}
                   onCheckedChange={(checked) => handleSettingChange('extractImages', checked)}
                   data-testid="checkbox-extract-images"
                 />
-                <Label className="text-sm">Extract images from PDFs</Label>
+                <Label htmlFor="extractImages" className="text-sm">Extract images from PDFs</Label>
               </div>
               <div className="flex items-center space-x-2">
                 <Checkbox
+                  id="enableOCR"
                   checked={settings.enableOCR}
                   onCheckedChange={(checked) => handleSettingChange('enableOCR', checked)}
                   data-testid="checkbox-enable-ocr"
                 />
-                <Label className="text-sm">OCR for scanned documents</Label>
+                <Label htmlFor="enableOCR" className="text-sm">OCR for scanned documents</Label>
               </div>
               <div className="flex items-center space-x-2">
                 <Checkbox
+                  id="autoDetectIndustry"
                   checked={settings.autoDetectIndustry}
                   onCheckedChange={(checked) => handleSettingChange('autoDetectIndustry', checked)}
                   data-testid="checkbox-auto-detect-industry"
                 />
-                <Label className="text-sm">Auto-detect document industry</Label>
+                <Label htmlFor="autoDetectIndustry" className="text-sm">Auto-detect document industry</Label>
               </div>
             </div>
           </div>
 
           <div>
-            <Label className="text-sm font-medium mb-2 block">Chunk Size</Label>
+            <Label htmlFor="chunkSize" className="text-sm font-medium mb-2 block">Chunk Size</Label>
             <Select
               value={settings.chunkSize.toString()}
               onValueChange={(value) => handleSettingChange('chunkSize', parseInt(value))}
             >
-              <SelectTrigger data-testid="select-chunk-size">
+              <SelectTrigger id="chunkSize" data-testid="select-chunk-size">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -88,15 +126,18 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 <SelectItem value="1000">1000 tokens</SelectItem>
               </SelectContent>
             </Select>
+            <p className="text-xs text-muted-foreground mt-1">
+              Smaller chunks improve precision, larger chunks provide more context
+            </p>
           </div>
 
           <div>
-            <Label className="text-sm font-medium mb-2 block">Response Length</Label>
+            <Label htmlFor="responseLength" className="text-sm font-medium mb-2 block">Response Length</Label>
             <Select
               value={settings.responseLength}
               onValueChange={(value) => handleSettingChange('responseLength', value)}
             >
-              <SelectTrigger data-testid="select-response-length">
+              <SelectTrigger id="responseLength" data-testid="select-response-length">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -111,8 +152,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             <Label className="text-sm font-medium mb-3 block">Voice Settings</Label>
             <div className="space-y-3">
               <div>
-                <Label className="text-xs text-muted-foreground mb-2 block">Voice Speed</Label>
+                <Label htmlFor="voiceSpeed" className="text-xs text-muted-foreground mb-2 block">Voice Speed</Label>
                 <Slider
+                  id="voiceSpeed"
                   value={[settings.voiceSpeed]}
                   onValueChange={([value]) => handleSettingChange('voiceSpeed', value)}
                   min={0.5}
@@ -123,37 +165,51 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 />
                 <div className="text-xs text-muted-foreground mt-1">{settings.voiceSpeed}x</div>
               </div>
-              <Select
-                value={settings.voiceLanguage}
-                onValueChange={(value) => handleSettingChange('voiceLanguage', value)}
-              >
-                <SelectTrigger data-testid="select-voice-language">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="en-US">English (US)</SelectItem>
-                  <SelectItem value="en-GB">English (UK)</SelectItem>
-                  <SelectItem value="es-ES">Spanish</SelectItem>
-                </SelectContent>
-              </Select>
+              <div>
+                <Label htmlFor="voiceLanguage" className="text-xs text-muted-foreground mb-2 block">Voice Language</Label>
+                <Select
+                  value={settings.voiceLanguage}
+                  onValueChange={(value) => handleSettingChange('voiceLanguage', value)}
+                >
+                  <SelectTrigger id="voiceLanguage" data-testid="select-voice-language">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="en-US">English (US)</SelectItem>
+                    <SelectItem value="en-GB">English (UK)</SelectItem>
+                    <SelectItem value="es-ES">Spanish</SelectItem>
+                    <SelectItem value="fr-FR">French</SelectItem>
+                    <SelectItem value="de-DE">German</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </div>
         </div>
 
-        <div className="flex justify-end space-x-3 mt-6">
+        <div className="flex justify-between space-x-3 mt-6">
           <Button
             variant="outline"
-            onClick={onClose}
-            data-testid="button-cancel-settings"
+            onClick={handleReset}
+            data-testid="button-reset-settings"
           >
-            Cancel
+            Reset to Defaults
           </Button>
-          <Button
-            onClick={handleSave}
-            data-testid="button-save-settings"
-          >
-            Save Changes
-          </Button>
+          <div className="flex space-x-3">
+            <Button
+              variant="outline"
+              onClick={onClose}
+              data-testid="button-cancel-settings"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSave}
+              data-testid="button-save-settings"
+            >
+              Save Changes
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>

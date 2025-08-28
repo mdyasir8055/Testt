@@ -10,10 +10,34 @@ import { ChatInput } from '@/components/chat/ChatInput';
 import { SettingsModal } from '@/components/modals/SettingsModal';
 import { SourcesModal } from '@/components/modals/SourcesModal';
 import { ComparisonMode } from '@/components/modes/ComparisonMode';
+import { PDFComparisonMode } from '@/components/modes/PDFComparisonMode';
 import { useVoice } from '@/hooks/use-voice';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
-import { Settings, Volume2, Mic } from 'lucide-react';
+import { 
+  Settings, 
+  Volume2, 
+  Mic, 
+  Trash2, 
+  FileText, 
+  ChevronDown, 
+  ChevronUp,
+  PauseCircle,
+  PlayCircle
+} from 'lucide-react';
+import { 
+  Select, 
+  SelectContent, 
+  SelectItem, 
+  SelectTrigger, 
+  SelectValue 
+} from '@/components/ui/select';
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import type { Document, ChatMessage as ChatMessageType, QueryResponse } from '@shared/schema';
 
 export default function Home() {
@@ -25,11 +49,15 @@ export default function Home() {
   const [isSourcesOpen, setIsSourcesOpen] = useState(false);
   const [selectedSources, setSelectedSources] = useState<QueryResponse['sources']>([]);
   const [isComparisonMode, setIsComparisonMode] = useState(false);
+  const [isPDFComparisonMode, setIsPDFComparisonMode] = useState(false);
   const [isVoiceInputActive, setIsVoiceInputActive] = useState(false);
+  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
+  const [isAudioPlaying, setIsAudioPlaying] = useState(false);
+  const [currentAudioText, setCurrentAudioText] = useState<string>('');
   
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const { isListening, startListening, stopListening, playAudio } = useVoice();
+  const { isListening, startListening, stopListening, playAudio, pauseAudio, resumeAudio } = useVoice();
 
   // Create initial chat session
   const createSessionMutation = useMutation({
@@ -43,7 +71,8 @@ export default function Home() {
   // Get documents
   const { data: documents = [], isLoading: documentsLoading } = useQuery({
     queryKey: ['/api/documents'],
-    queryFn: () => api.documents.list(),
+    queryFn: () => api.documents.listWithStatus(),
+    refetchInterval: 1000, // keep polling so UI updates promptly
   });
 
   // Get chat messages
@@ -74,6 +103,27 @@ export default function Home() {
     },
   });
 
+  // Clear chat history mutation
+  const clearChatMutation = useMutation({
+    mutationFn: api.chat.clearHistory,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ 
+        queryKey: ['/api/chat/sessions', currentSessionId, 'messages'] 
+      });
+      toast({
+        title: "Chat cleared",
+        description: "Your chat history has been cleared.",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Error",
+        description: "Failed to clear chat history. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
   // Initialize session on mount
   useEffect(() => {
     if (!currentSessionId) {
@@ -88,13 +138,25 @@ export default function Home() {
   const handleSendMessage = (message: string) => {
     if (!currentSessionId || !message.trim()) return;
 
-    const documentIds = documents.map(doc => doc.id);
+    // If a specific document is selected, only use that document
+    const documentIds = selectedDocumentId 
+      ? [selectedDocumentId] 
+      : documents.filter(doc => doc.status === 'ready').map(doc => doc.id);
+    
+    if (documentIds.length === 0) {
+      toast({
+        title: "No documents available",
+        description: "Please upload and process at least one document first.",
+        variant: "destructive",
+      });
+      return;
+    }
     
     sendMessageMutation.mutate({
       sessionId: currentSessionId,
       message: message.trim(),
       mode: `${selectedIndustry}_${chatMode}`,
-      documentIds: documentIds.length > 0 ? documentIds : undefined,
+      documentIds: documentIds,
     });
   };
 
@@ -111,14 +173,28 @@ export default function Home() {
 
   const handlePlayAudio = async (text: string) => {
     try {
+      setIsAudioPlaying(true);
+      setCurrentAudioText(text);
       await playAudio(text);
+      setIsAudioPlaying(false);
+      setCurrentAudioText('');
     } catch (error) {
+      setIsAudioPlaying(false);
+      setCurrentAudioText('');
       toast({
         title: "Audio Error",
         description: "Failed to play audio. Please try again.",
         variant: "destructive",
       });
     }
+  };
+
+  const handlePauseAudio = () => {
+    pauseAudio();
+  };
+
+  const handleResumeAudio = () => {
+    resumeAudio();
   };
 
   const handleShowSources = (sources: QueryResponse['sources']) => {
@@ -130,12 +206,26 @@ export default function Home() {
     setChatMode(mode);
     if (mode === 'comparison') {
       setIsComparisonMode(true);
+    } else if (mode === 'pdfComparison') {
+      setIsPDFComparisonMode(true);
+    }
+  };
+
+  const handleClearChat = () => {
+    if (currentSessionId) {
+      clearChatMutation.mutate(currentSessionId);
     }
   };
 
   if (isComparisonMode) {
     return <ComparisonMode onExit={() => setIsComparisonMode(false)} />;
   }
+
+  if (isPDFComparisonMode) {
+    return <PDFComparisonMode onExit={() => setIsPDFComparisonMode(false)} />;
+  }
+
+  const readyDocuments = documents.filter(doc => doc.status === 'ready');
 
   return (
     <>
@@ -151,11 +241,48 @@ export default function Home() {
           {/* Document Upload */}
           <DocumentUpload documents={documents} isLoading={documentsLoading} />
 
+          {/* Document Selection for Chat */}
+          {readyDocuments.length > 0 && (
+            <div className="p-6 border-b border-border">
+              <h2 className="text-sm font-medium text-foreground mb-3">Chat with Document</h2>
+              <Select 
+                value={selectedDocumentId || 'all'} 
+                onValueChange={(value) => setSelectedDocumentId(value === 'all' ? null : value)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="All documents" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All documents</SelectItem>
+                  {readyDocuments.map((doc) => (
+                    <SelectItem key={doc.id} value={doc.id}>
+                      {doc.originalName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground mt-2">
+                {selectedDocumentId 
+                  ? "Chatting with selected document only" 
+                  : "Chatting with all documents"}
+              </p>
+            </div>
+          )}
+
           {/* Model Selection */}
-          <ModelSelection 
-            selectedModel={selectedModel} 
-            onModelChange={setSelectedModel} 
-          />
+          <Accordion type="single" collapsible className="border-b border-border">
+            <AccordionItem value="model-selection" className="border-0">
+              <AccordionTrigger className="px-6 py-3 text-sm font-medium">
+                API Configuration
+              </AccordionTrigger>
+              <AccordionContent className="px-6 pb-4">
+                <ModelSelection 
+                  selectedModel={selectedModel} 
+                  onModelChange={setSelectedModel} 
+                />
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
 
           {/* Mode Selection */}
           <ModeSelection 
@@ -177,9 +304,22 @@ export default function Home() {
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-lg font-semibold text-foreground">Chat with your documents</h2>
-                <p className="text-sm text-muted-foreground">Ask questions about your uploaded PDFs</p>
+                <p className="text-sm text-muted-foreground">
+                  {selectedDocumentId 
+                    ? `Asking questions about: ${readyDocuments.find(d => d.id === selectedDocumentId)?.originalName}` 
+                    : "Ask questions about your uploaded PDFs"}
+                </p>
               </div>
               <div className="flex items-center space-x-3">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleClearChat}
+                  disabled={messages.length === 0}
+                  data-testid="button-clear-chat"
+                >
+                  <Trash2 className="h-5 w-5" />
+                </Button>
                 <Button
                   variant="ghost"
                   size="sm"
@@ -266,6 +406,36 @@ export default function Home() {
                 >
                   Stop
                 </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Audio Playback Controls */}
+          {isAudioPlaying && (
+            <div className="mx-6 mb-3 p-3 bg-primary/10 rounded-lg border border-primary/20" data-testid="audio-controls">
+              <div className="flex items-center space-x-3">
+                <Volume2 className="h-4 w-4 text-primary" />
+                <span className="text-sm text-foreground truncate flex-1">Playing audio...</span>
+                <div className="flex space-x-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handlePauseAudio}
+                    className="text-primary"
+                    data-testid="button-pause-audio"
+                  >
+                    <PauseCircle className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleResumeAudio}
+                    className="text-primary"
+                    data-testid="button-resume-audio"
+                  >
+                    <PlayCircle className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
             </div>
           )}

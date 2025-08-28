@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Upload, FileText, CheckCircle, AlertCircle, Loader2, Globe, Link2 } from 'lucide-react';
+import { Upload, FileText, CheckCircle, AlertCircle, Loader2, Globe, Link2, Trash2 } from 'lucide-react';
 import type { Document } from '@shared/schema';
 
 interface DocumentUploadProps {
@@ -57,6 +57,24 @@ export function DocumentUpload({ documents, isLoading }: DocumentUploadProps) {
     },
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: (documentId: string) => api.documents.delete(documentId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/documents'] });
+      toast({
+        title: "Document deleted",
+        description: "The document has been removed successfully.",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Delete failed",
+        description: "Failed to delete the document. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
   const onDrop = useCallback((acceptedFiles: File[]) => {
     acceptedFiles.forEach((file) => {
       if (file.type === 'application/pdf') {
@@ -92,12 +110,12 @@ export function DocumentUpload({ documents, isLoading }: DocumentUploadProps) {
     }
   };
 
-  const getStatusText = (status: string) => {
+  const getStatusText = (status: string, progress?: number) => {
     switch (status) {
       case 'ready':
         return 'Ready';
       case 'processing':
-        return 'Processing...';
+        return `Processing${typeof progress === 'number' ? ` ${progress}%` : '...'}`;
       case 'error':
         return 'Error';
       default:
@@ -125,6 +143,10 @@ export function DocumentUpload({ documents, isLoading }: DocumentUploadProps) {
         variant: "destructive",
       });
     }
+  };
+
+  const handleDeleteDocument = (documentId: string) => {
+    deleteMutation.mutate(documentId);
   };
 
   const getSourceIcon = (document: Document) => {
@@ -234,9 +256,20 @@ export function DocumentUpload({ documents, isLoading }: DocumentUploadProps) {
                   )}
                 </div>
               </div>
-              <span className="text-xs text-muted-foreground">
-                {getStatusText(document.status)}
-              </span>
+              <div className="flex items-center space-x-2">
+                <span className="text-xs text-muted-foreground">
+                  {getStatusText(document.status, (document as any).progress)}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                  onClick={() => handleDeleteDocument(document.id)}
+                  data-testid={`button-delete-${document.id}`}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
           ))}
         </div>

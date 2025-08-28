@@ -41,6 +41,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const userId = req.body.userId || "default-user"; // In production, get from auth
+
+      // If a document with same originalName and size exists, reuse it (prefer ready; otherwise return processing)
+      try {
+        const userDocs = await storage.getUserDocuments(userId);
+        const existingReady = userDocs.find(d => d.originalName === req.file.originalname && d.size === req.file.size && d.status === 'ready');
+        if (existingReady) {
+          const tempPath = req.file.path;
+          if (tempPath && fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+          return res.json(existingReady);
+        }
+        const existingProcessing = userDocs.find(d => d.originalName === req.file.originalname && d.size === req.file.size && d.status === 'processing');
+        if (existingProcessing) {
+          const tempPath = req.file.path;
+          if (tempPath && fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+          return res.json(existingProcessing);
+        }
+      } catch {}
       
       const document = await storage.createDocument({
         userId,
@@ -109,7 +126,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get document status
+  // Get document status with simple progress estimate
   app.get("/api/documents/:id/status", async (req, res) => {
     try {
       const document = await storage.getDocument(req.params.id);
@@ -117,9 +134,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "Document not found" });
       }
 
+      // Heuristic progress: based on chunkCount if available, fallback to time since upload
+      let progress: number | undefined = undefined;
+      const totalExpectedChunks = (document.metadata as any)?.chunkCount || document.chunkCount || 8; // default 8 in mock
+      if (document.status === 'ready') {
+        progress = 100;
+      } else if (document.status === 'processing') {
+        const currentChunks = await storage.getDocumentChunks(document.id);
+        if (currentChunks.length > 0 && totalExpectedChunks > 0) {
+          progress = Math.min(99, Math.round((currentChunks.length / totalExpectedChunks) * 100));
+        } else if (document.uploadedAt) {
+          const elapsed = Date.now() - new Date(document.uploadedAt).getTime();
+          progress = Math.max(5, Math.min(95, Math.round((elapsed / 3000) * 100))); // ~3s simulated
+        } else {
+          progress = 10;
+        }
+      }
+
       const status: DocumentProcessingStatus = {
         id: document.id,
         status: document.status as any,
+        progress,
         chunkCount: document.chunkCount || 0,
         industry: document.industry || undefined,
       };
@@ -140,6 +175,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Get documents error:", error);
       res.status(500).json({ error: "Failed to get documents" });
+    }
+  });
+
+  // Delete a document (and its chunks)
+  app.delete("/api/documents/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const doc = await storage.getDocument(id);
+      if (!doc) return res.status(404).json({ error: "Document not found" });
+      await storage.deleteDocument(id);
+      // Optionally remove file from uploads folder
+      try {
+        const filePath = path.join(process.cwd(), 'uploads', doc.filename);
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      } catch {}
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Delete document error:", error);
+      res.status(500).json({ error: "Failed to delete document" });
+    }
+  });
+
+  // Delete a chat session (and its messages)
+  app.delete("/api/chat/sessions/:sessionId", async (req, res) => {
+    try {
+      const { sessionId } = req.params;
+      const session = await storage.getChatSession(sessionId);
+      if (!session) return res.status(404).json({ error: "Chat session not found" });
+      await storage.deleteChatSession(sessionId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Delete chat session error:", error);
+      res.status(500).json({ error: "Failed to delete chat session" });
     }
   });
 

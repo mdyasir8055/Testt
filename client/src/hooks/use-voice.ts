@@ -4,8 +4,10 @@ import { api } from '@/lib/api';
 export function useVoice() {
   const [isListening, setIsListening] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const speechSynthesisRef = useRef<SpeechSynthesisUtterance | null>(null);
 
   const startListening = useCallback(async () => {
     try {
@@ -63,14 +65,13 @@ export function useVoice() {
             const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
             audioResult = await blobToBase64(audioBlob);
             
-            // Clean up stream
             // Clean up stream tracks
-          if (mediaRecorderRef.current) {
-            const stream = mediaRecorderRef.current.stream;
-            if (stream) {
-              stream.getTracks().forEach(track => track.stop());
+            if (mediaRecorderRef.current) {
+              const stream = mediaRecorderRef.current.stream;
+              if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+              }
             }
-          }
             
             resolve(audioResult);
           } catch (error) {
@@ -91,9 +92,17 @@ export function useVoice() {
 
   const playAudio = useCallback(async (text: string, voice?: string) => {
     try {
+      // Cancel any ongoing speech
+      if (speechSynthesis.speaking) {
+        speechSynthesis.cancel();
+      }
+      
+      setIsPaused(false);
+      
       // Use browser's built-in Web Speech API for text-to-speech
       if ('speechSynthesis' in window) {
         const utterance = new SpeechSynthesisUtterance(text);
+        speechSynthesisRef.current = utterance;
         
         // Configure voice settings
         utterance.rate = 0.9;
@@ -110,9 +119,13 @@ export function useVoice() {
         }
         
         return new Promise<void>((resolve, reject) => {
-          utterance.onend = () => resolve();
+          utterance.onend = () => {
+            speechSynthesisRef.current = null;
+            resolve();
+          };
           utterance.onerror = (error) => {
             console.error('Speech synthesis error:', error);
+            speechSynthesisRef.current = null;
             reject(error);
           };
           
@@ -128,12 +141,38 @@ export function useVoice() {
     }
   }, []);
 
+  const pauseAudio = useCallback(() => {
+    if (speechSynthesis.speaking && !isPaused) {
+      speechSynthesis.pause();
+      setIsPaused(true);
+    }
+  }, [isPaused]);
+
+  const resumeAudio = useCallback(() => {
+    if (speechSynthesis.speaking && isPaused) {
+      speechSynthesis.resume();
+      setIsPaused(false);
+    }
+  }, [isPaused]);
+
+  const stopAudio = useCallback(() => {
+    if (speechSynthesis.speaking) {
+      speechSynthesis.cancel();
+      speechSynthesisRef.current = null;
+      setIsPaused(false);
+    }
+  }, []);
+
   return {
     isListening,
     isProcessing,
+    isPaused,
     startListening,
     stopListening,
     playAudio,
+    pauseAudio,
+    resumeAudio,
+    stopAudio,
   };
 }
 

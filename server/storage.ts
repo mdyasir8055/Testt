@@ -12,6 +12,7 @@ export interface IStorage {
   getDocument(id: string): Promise<Document | undefined>;
   getUserDocuments(userId: string): Promise<Document[]>;
   updateDocumentStatus(id: string, status: string, metadata?: any): Promise<void>;
+  deleteDocument(id: string): Promise<void>;
   
   // Document chunks
   createDocumentChunk(chunk: Omit<DocumentChunk, 'id' | 'createdAt'>): Promise<DocumentChunk>;
@@ -22,10 +23,12 @@ export interface IStorage {
   getChatSession(id: string): Promise<ChatSession | undefined>;
   getUserChatSessions(userId: string): Promise<ChatSession[]>;
   updateChatSession(id: string, updates: Partial<ChatSession>): Promise<void>;
+  deleteChatSession(id: string): Promise<void>;
   
   // Chat messages
   createChatMessage(message: InsertChatMessage): Promise<ChatMessage>;
   getChatMessages(sessionId: string): Promise<ChatMessage[]>;
+  clearChatHistory(sessionId: string): Promise<void>;
 }
 
 export class MemStorage implements IStorage {
@@ -57,10 +60,13 @@ export class MemStorage implements IStorage {
       id,
       uploadedAt: new Date(),
       processedAt: null,
-      chunkCount: 0,
-      status: insertDocument.status || "processing",
-      metadata: insertDocument.metadata || null,
-      industry: insertDocument.industry || null,
+      // Ensure required fields match Document type expectations
+      sourceType: insertDocument.sourceType ?? "pdf",
+      sourceUrl: insertDocument.sourceUrl ?? null,
+      status: insertDocument.status ?? "processing",
+      metadata: insertDocument.metadata ?? null,
+      industry: insertDocument.industry ?? null,
+      chunkCount: insertDocument.chunkCount ?? 0,
     };
     this.documents.set(id, document);
     return document;
@@ -82,8 +88,16 @@ export class MemStorage implements IStorage {
         status,
         processedAt: status === 'ready' ? new Date() : document.processedAt,
         metadata: metadata || document.metadata,
+        // propagate key fields for client display
+        industry: (metadata && (metadata.industry || metadata.detectedIndustry)) ?? document.industry,
+        chunkCount: (metadata && (metadata.chunkCount ?? metadata?.metadata?.chunkCount)) ?? document.chunkCount,
       });
     }
+  }
+
+  async deleteDocument(id: string): Promise<void> {
+    this.documents.delete(id);
+    this.documentChunks.delete(id);
   }
 
   async createDocumentChunk(chunk: Omit<DocumentChunk, 'id' | 'createdAt'>): Promise<DocumentChunk> {
@@ -158,6 +172,15 @@ export class MemStorage implements IStorage {
 
   async getChatMessages(sessionId: string): Promise<ChatMessage[]> {
     return this.chatMessages.get(sessionId) || [];
+  }
+
+  async clearChatHistory(sessionId: string): Promise<void> {
+    this.chatMessages.set(sessionId, []);
+  }
+
+  async deleteChatSession(id: string): Promise<void> {
+    this.chatSessions.delete(id);
+    this.chatMessages.delete(id);
   }
 }
 
